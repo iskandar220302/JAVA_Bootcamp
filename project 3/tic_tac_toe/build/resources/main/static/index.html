@@ -1,0 +1,263 @@
+
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Крестики-нолики</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: Arial, sans-serif;
+            color: #f1f5f9;
+            background: #0f172a;
+        }
+
+        .game {
+            width: min(92vw, 420px);
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 32px;
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            color: #94a3b8;
+            margin-bottom: 28px;
+        }
+
+        #status {
+            min-height: 28px;
+            margin-bottom: 20px;
+            color: #cbd5e1;
+        }
+
+        .board {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+        }
+
+        .cell {
+            aspect-ratio: 1;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            background: #1e293b;
+            color: #60a5fa;
+            font-size: clamp(42px, 13vw, 68px);
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.2s;
+        }
+
+        .cell:hover:empty {
+            background: #334155;
+            transform: scale(1.03);
+        }
+
+        .cell:disabled {
+            cursor: default;
+        }
+
+        .cell.o {
+            color: #c084fc;
+        }
+
+        .new-game {
+            width: 100%;
+            margin-top: 22px;
+            padding: 14px;
+            border: none;
+            border-radius: 10px;
+            color: white;
+            background: #3b82f6;
+            font-size: 16px;
+            cursor: pointer;
+        }
+
+        .new-game:hover {
+            background: #2563eb;
+        }
+    </style>
+</head>
+
+<body>
+<main class="game">
+    <h1>Крестики-нолики</h1>
+    <p class="subtitle">Играй против компьютера</p>
+
+    <div id="status">Создаём новую игру...</div>
+
+    <div class="board" id="board">
+        <button class="cell" data-index="0"></button>
+        <button class="cell" data-index="1"></button>
+        <button class="cell" data-index="2"></button>
+        <button class="cell" data-index="3"></button>
+        <button class="cell" data-index="4"></button>
+        <button class="cell" data-index="5"></button>
+        <button class="cell" data-index="6"></button>
+        <button class="cell" data-index="7"></button>
+        <button class="cell" data-index="8"></button>
+    </div>
+
+    <button class="new-game" id="newGame">↻ Новая игра</button>
+</main>
+
+<script>
+    const statusElement = document.getElementById("status");
+    const cells = document.querySelectorAll(".cell");
+    const newGameButton = document.getElementById("newGame");
+
+    let gameId = null;
+    let board = Array(9).fill(0);
+    let gameOver = false;
+    let busy = false;
+
+    async function newGame() {
+        busy = true;
+        gameOver = false;
+        statusElement.textContent = "Создаём новую игру...";
+        renderBoard();
+
+        try {
+            const response = await fetch("/game", {
+                method: "POST"
+            });
+
+            if (!response.ok) {
+                throw new Error("Не удалось создать игру");
+            }
+
+            const game = await response.json();
+            gameId = game.id;
+            board = game.field.cells.flat();
+
+            statusElement.textContent = "Твой ход — поставь крестик";
+        } catch (error) {
+            statusElement.textContent = "Ошибка подключения к серверу";
+            console.error(error);
+        } finally {
+            busy = false;
+            renderBoard();
+        }
+    }
+
+    async function makeMove(index) {
+        if (busy || gameOver || board[index] !== 0 || !gameId) {
+            return;
+        }
+
+        const nextBoard = [...board];
+        nextBoard[index] = 1;
+
+        board = nextBoard;
+        renderBoard();
+
+        if (hasWinner(board, 1)) {
+            gameOver = true;
+            statusElement.textContent = "Ты победил! 🎉";
+            renderBoard();
+            return;
+        }
+
+        if (board.every(cell => cell !== 0)) {
+            gameOver = true;
+            statusElement.textContent = "Ничья!";
+            renderBoard();
+            return;
+        }
+
+        busy = true;
+        statusElement.textContent = "Компьютер думает...";
+        renderBoard();
+
+        try {
+            const response = await fetch(`/game/${gameId}`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    id: gameId,
+                    field: {
+                        cells: [
+                            board.slice(0, 3),
+                            board.slice(3, 6),
+                            board.slice(6, 9)
+                        ]
+                    }
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(await response.text());
+            }
+
+            const game = await response.json();
+            board = game.field.cells.flat();
+
+            if (hasWinner(board, 2)) {
+                gameOver = true;
+                statusElement.textContent = "Компьютер победил!";
+            } else if (board.every(cell => cell !== 0)) {
+                gameOver = true;
+                statusElement.textContent = "Ничья!";
+            } else {
+                statusElement.textContent = "Твой ход — поставь крестик";
+            }
+        } catch (error) {
+            statusElement.textContent = "Ошибка хода. Начни новую игру.";
+            console.error(error);
+            gameOver = true;
+        } finally {
+            busy = false;
+            renderBoard();
+        }
+    }
+
+    function hasWinner(cells, player) {
+        const lines = [
+            [0, 1, 2], [3, 4, 5], [6, 7, 8],
+            [0, 3, 6], [1, 4, 7], [2, 5, 8],
+            [0, 4, 8], [2, 4, 6]
+        ];
+
+        return lines.some(line =>
+            line.every(index => cells[index] === player)
+        );
+    }
+
+    function renderBoard() {
+        cells.forEach((cell, index) => {
+            cell.textContent =
+                board[index] === 1 ? "X" :
+                board[index] === 2 ? "O" : "";
+
+            cell.classList.toggle("o", board[index] === 2);
+            cell.disabled = busy || gameOver || board[index] !== 0;
+        });
+
+        newGameButton.disabled = false;
+    }
+
+    cells.forEach((cell, index) => {
+        cell.addEventListener("click", () => makeMove(index));
+    });
+
+    newGameButton.addEventListener("click", newGame);
+
+    newGame();
+</script>
+</body>
+</html>
